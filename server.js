@@ -176,9 +176,39 @@ const TONE_PRESETS = {
   },
 };
 
-function buildStyledPrompt(chunkText, toneKey) {
-  const preset = TONE_PRESETS[toneKey] || TONE_PRESETS[DEFAULT_TONE];
-  return `${preset.instruction}\n\n${chunkText}`;
+const DEFAULT_ACCENT = 'default';
+
+const ACCENT_PRESETS = {
+  default: {
+    label: 'Default (Neutral)',
+    instruction: '',
+  },
+  indian: {
+    label: 'Indian English',
+    instruction: 'Speak with a natural Indian English accent.',
+  },
+  american: {
+    label: 'American English',
+    instruction: 'Speak with a natural American English accent.',
+  },
+  british: {
+    label: 'British English',
+    instruction: 'Speak with a natural British English accent.',
+  },
+  australian: {
+    label: 'Australian English',
+    instruction: 'Speak with a natural Australian English accent.',
+  },
+};
+
+function buildStyleInstruction(toneKey, accentKey) {
+  const tone = TONE_PRESETS[toneKey] || TONE_PRESETS[DEFAULT_TONE];
+  const accent = ACCENT_PRESETS[accentKey] || ACCENT_PRESETS[DEFAULT_ACCENT];
+  return accent.instruction ? `${tone.instruction} ${accent.instruction}` : tone.instruction;
+}
+
+function buildStyledPrompt(chunkText, toneKey, accentKey) {
+  return `${buildStyleInstruction(toneKey, accentKey)}\n\n${chunkText}`;
 }
 
 class QuotaError extends Error {}
@@ -195,9 +225,7 @@ const MAX_TRANSIENT_RETRIES = 2;
 // at the same 24kHz/mono/16-bit layout Gemini uses, so a fallback chunk can
 // be concatenated with Gemini chunks and wrapped in one WAV header exactly
 // like a normal chunk — no format conversion needed.
-async function generateSpeechViaOpenAI(chunkText, toneKey) {
-  const preset = TONE_PRESETS[toneKey] || TONE_PRESETS[DEFAULT_TONE];
-
+async function generateSpeechViaOpenAI(chunkText, toneKey, accentKey) {
   const response = await fetch('https://api.openai.com/v1/audio/speech', {
     method: 'POST',
     headers: {
@@ -208,7 +236,7 @@ async function generateSpeechViaOpenAI(chunkText, toneKey) {
       model: OPENAI_TTS_MODEL,
       voice: OPENAI_TTS_VOICE,
       input: chunkText,
-      instructions: preset.instruction,
+      instructions: buildStyleInstruction(toneKey, accentKey),
       response_format: 'pcm',
     }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -227,8 +255,8 @@ async function generateSpeechViaOpenAI(chunkText, toneKey) {
   };
 }
 
-async function generateSpeechForChunk(chunkText, toneKey) {
-  const prompt = buildStyledPrompt(chunkText, toneKey);
+async function generateSpeechForChunk(chunkText, toneKey, accentKey) {
+  const prompt = buildStyledPrompt(chunkText, toneKey, accentKey);
   let rateLimitAttempts = 0;
   let transientAttempts = 0;
   let delay = 1000;
@@ -286,7 +314,7 @@ async function generateSpeechForChunk(chunkText, toneKey) {
       if (isRateLimit) {
         if (OPENAI_API_KEY) {
           try {
-            return await generateSpeechViaOpenAI(chunkText, toneKey);
+            return await generateSpeechViaOpenAI(chunkText, toneKey, accentKey);
           } catch (fallbackErr) {
             throw new QuotaError(
               "Gemini's rate limit was hit and the OpenAI fallback also failed: " +
@@ -320,6 +348,16 @@ app.get('/api/tones', (req, res) => {
   });
 });
 
+app.get('/api/accents', (req, res) => {
+  res.json({
+    accents: Object.entries(ACCENT_PRESETS).map(([key, preset]) => ({
+      key,
+      label: preset.label,
+    })),
+    defaultAccent: DEFAULT_ACCENT,
+  });
+});
+
 app.post('/api/generate', async (req, res) => {
   try {
     if (!ai) {
@@ -343,6 +381,11 @@ app.post('/api/generate', async (req, res) => {
       ? requestedTone
       : DEFAULT_TONE;
 
+    const requestedAccent = typeof req.body?.accent === 'string' ? req.body.accent : '';
+    const accent = Object.prototype.hasOwnProperty.call(ACCENT_PRESETS, requestedAccent)
+      ? requestedAccent
+      : DEFAULT_ACCENT;
+
     const chunks = splitTextIntoChunks(text, CHUNK_CHAR_LIMIT);
     const audioChunks = [];
     let sampleRate = 24000;
@@ -351,7 +394,8 @@ app.post('/api/generate', async (req, res) => {
     for (let i = 0; i < chunks.length; i += 1) {
       const { buffer, sampleRate: chunkRate, provider } = await generateSpeechForChunk(
         chunks[i],
-        tone
+        tone,
+        accent
       );
       audioChunks.push(buffer);
       if (i === 0) sampleRate = chunkRate;

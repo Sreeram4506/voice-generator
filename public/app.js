@@ -2,6 +2,7 @@ const form = document.getElementById('tts-form');
 const textArea = document.getElementById('script-text');
 const charCount = document.getElementById('char-count');
 const toneSelect = document.getElementById('tone-select');
+const accentSelect = document.getElementById('accent-select');
 const generateBtn = document.getElementById('generate-btn');
 const loadingEl = document.getElementById('loading');
 const errorEl = document.getElementById('error-banner');
@@ -16,40 +17,66 @@ textArea.addEventListener('input', () => {
   charCount.textContent = `${textArea.value.length} characters`;
 });
 
-async function loadTones() {
-  const fallbackTones = [
-    { key: 'warm', label: 'Warm & Enthusiastic' },
-    { key: 'joyful', label: 'Joyful & Upbeat' },
-    { key: 'professional', label: 'Professional & Polished' },
-    { key: 'casual', label: 'Casual & Friendly' },
-    { key: 'confident', label: 'Confident & Bold' },
-    { key: 'calm', label: 'Calm & Reassuring' },
-  ];
-
-  let tones = fallbackTones;
-  let defaultTone = 'warm';
+async function loadOptions(selectEl, endpoint, itemsKey, defaultKeyProp, fallbackItems, fallbackDefault) {
+  let items = fallbackItems;
+  let defaultKey = fallbackDefault;
 
   try {
-    const response = await fetch('/api/tones');
+    const response = await fetch(endpoint);
     if (response.ok) {
       const data = await response.json();
-      if (Array.isArray(data.tones) && data.tones.length > 0) {
-        tones = data.tones;
-        defaultTone = data.defaultTone || tones[0].key;
+      if (Array.isArray(data[itemsKey]) && data[itemsKey].length > 0) {
+        items = data[itemsKey];
+        defaultKey = data[defaultKeyProp] || items[0].key;
       }
     }
   } catch {
     // Fall back to the built-in list if the request fails for any reason.
   }
 
-  toneSelect.innerHTML = '';
-  for (const tone of tones) {
+  selectEl.innerHTML = '';
+  for (const item of items) {
     const option = document.createElement('option');
-    option.value = tone.key;
-    option.textContent = tone.label;
-    toneSelect.appendChild(option);
+    option.value = item.key;
+    option.textContent = item.label;
+    selectEl.appendChild(option);
   }
-  toneSelect.value = defaultTone;
+  selectEl.value = defaultKey;
+}
+
+function loadTones() {
+  return loadOptions(
+    toneSelect,
+    '/api/tones',
+    'tones',
+    'defaultTone',
+    [
+      { key: 'warm', label: 'Warm & Enthusiastic' },
+      { key: 'joyful', label: 'Joyful & Upbeat' },
+      { key: 'professional', label: 'Professional & Polished' },
+      { key: 'casual', label: 'Casual & Friendly' },
+      { key: 'confident', label: 'Confident & Bold' },
+      { key: 'calm', label: 'Calm & Reassuring' },
+    ],
+    'warm'
+  );
+}
+
+function loadAccents() {
+  return loadOptions(
+    accentSelect,
+    '/api/accents',
+    'accents',
+    'defaultAccent',
+    [
+      { key: 'default', label: 'Default (Neutral)' },
+      { key: 'indian', label: 'Indian English' },
+      { key: 'american', label: 'American English' },
+      { key: 'british', label: 'British English' },
+      { key: 'australian', label: 'Australian English' },
+    ],
+    'default'
+  );
 }
 
 form.addEventListener('submit', async (event) => {
@@ -67,7 +94,11 @@ form.addEventListener('submit', async (event) => {
     const response = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, tone: toneSelect.value }),
+      body: JSON.stringify({
+        text,
+        tone: toneSelect.value,
+        accent: accentSelect.value,
+      }),
     });
 
     if (!response.ok) {
@@ -105,3 +136,4 @@ form.addEventListener('submit', async (event) => {
 });
 
 loadTones();
+loadAccents();
