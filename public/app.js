@@ -8,6 +8,7 @@ const errorEl = document.getElementById('error-banner');
 const resultEl = document.getElementById('result');
 const audioPlayer = document.getElementById('audio-player');
 const downloadLink = document.getElementById('download-link');
+const fallbackNoteEl = document.getElementById('fallback-note');
 
 let currentAudioUrl = null;
 
@@ -80,6 +81,7 @@ form.addEventListener('submit', async (event) => {
       throw new Error(message);
     }
 
+    const usedFallback = response.headers.get('X-Used-Fallback') === 'true';
     const blob = await response.blob();
 
     if (currentAudioUrl) {
@@ -90,6 +92,7 @@ form.addEventListener('submit', async (event) => {
     audioPlayer.src = currentAudioUrl;
     downloadLink.href = currentAudioUrl;
     downloadLink.download = `voiceover-${Date.now()}.wav`;
+    fallbackNoteEl.hidden = !usedFallback;
     resultEl.hidden = false;
   } catch (err) {
     errorEl.textContent = err.message;

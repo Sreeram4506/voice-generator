@@ -12,3 +12,9 @@ services:
         value: gemini-2.5-flash-preview-tts
       - key: TTS_VOICE_NAME
         value: Puck
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_TTS_MODEL
+        value: gpt-4o-mini-tts
+      - key: OPENAI_TTS_VOICE
+        value: alloy

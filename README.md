@@ -29,7 +29,7 @@ A minimal web tool for turning marketing scripts into natural-sounding voiceover
 - Paste a script into the text box, pick a **voice tone** (Warm, Joyful, Professional, Casual, Confident, or Calm), and click **Generate Voiceover**.
 - The server wraps your text in a style instruction matching the chosen tone and sends it to a Gemini TTS model (`gemini-2.5-flash-preview-tts` by default).
 - Scripts longer than ~4,000 characters are automatically split at paragraph/sentence boundaries into multiple chunks, sent to Gemini one at a time, and the resulting audio is stitched back together into a single WAV file.
-- If the Gemini API returns a rate-limit/quota error (common on the free tier), the server retries a few times with exponential backoff before surfacing a clear error message. A stalled network call is also bounded by a request timeout so it fails with a clear error instead of hanging.
+- If the Gemini API returns a rate-limit/quota error (common on the free tier), the server retries a few times with exponential backoff. If `OPENAI_API_KEY` is set and Gemini is still rate-limited after those retries, the chunk is regenerated with OpenAI's TTS instead so the request still succeeds (the result shows a small note when this happens); without it, a clear quota error is returned. A stalled network call is also bounded by a request timeout so it fails with a clear error instead of hanging.
 - The finished clip is streamed straight back in the HTTP response (no file is ever written to disk), so this works on hosts with a read-only filesystem too, such as serverless platforms.
 
 ## Configuration
@@ -42,6 +42,9 @@ All configuration is via environment variables (see `.env.example`):
 | `PORT` | `3000` | Port the server listens on. |
 | `TTS_MODEL` | `gemini-2.5-flash-preview-tts` | Gemini TTS model to use. |
 | `TTS_VOICE_NAME` | `Puck` | Prebuilt Gemini voice name. |
+| `OPENAI_API_KEY` | *(optional)* | Used only as a fallback when Gemini's rate limit/quota is hit. Without it, a quota hit just returns an error. |
+| `OPENAI_TTS_MODEL` | `gpt-4o-mini-tts` | OpenAI TTS model used for the fallback. |
+| `OPENAI_TTS_VOICE` | `alloy` | OpenAI voice used for the fallback. |
 
 ## Deploying to Render
 

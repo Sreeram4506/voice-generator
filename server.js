@@ -11,6 +11,12 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const TTS_MODEL = process.env.TTS_MODEL || 'gemini-2.5-flash-preview-tts';
 const TTS_VOICE_NAME = process.env.TTS_VOICE_NAME || 'Puck';
 
+// Optional fallback used only when Gemini's own rate-limit retries are
+// exhausted, so a quota hit degrades to a different voice instead of failing.
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_TTS_MODEL = process.env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts';
+const OPENAI_TTS_VOICE = process.env.OPENAI_TTS_VOICE || 'alloy';
+
 // Gemini TTS sessions support ~32k tokens of context and (aside from one
 // preview streaming model) return the whole clip in a single response, so a
 // script that fits comfortably under that gets sent as one request. Anything
@@ -185,6 +191,42 @@ const REQUEST_TIMEOUT_MS = 20000;
 const MAX_RATE_LIMIT_RETRIES = 4;
 const MAX_TRANSIENT_RETRIES = 2;
 
+// OpenAI's audio/speech endpoint can return raw PCM (response_format: 'pcm')
+// at the same 24kHz/mono/16-bit layout Gemini uses, so a fallback chunk can
+// be concatenated with Gemini chunks and wrapped in one WAV header exactly
+// like a normal chunk — no format conversion needed.
+async function generateSpeechViaOpenAI(chunkText, toneKey) {
+  const preset = TONE_PRESETS[toneKey] || TONE_PRESETS[DEFAULT_TONE];
+
+  const response = await fetch('https://api.openai.com/v1/audio/speech', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: OPENAI_TTS_MODEL,
+      voice: OPENAI_TTS_VOICE,
+      input: chunkText,
+      instructions: preset.instruction,
+      response_format: 'pcm',
+    }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(`OpenAI TTS request failed (${response.status}): ${detail.slice(0, 200)}`);
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  return {
+    buffer: Buffer.from(arrayBuffer),
+    sampleRate: 24000,
+    provider: 'openai',
+  };
+}
+
 async function generateSpeechForChunk(chunkText, toneKey) {
   const prompt = buildStyledPrompt(chunkText, toneKey);
   let rateLimitAttempts = 0;
@@ -215,6 +257,7 @@ async function generateSpeechForChunk(chunkText, toneKey) {
       return {
         buffer: Buffer.from(audioData, 'base64'),
         sampleRate: extractSampleRate(part.inlineData.mimeType),
+        provider: 'gemini',
       };
     } catch (err) {
       const status = err?.status ?? err?.response?.status;
@@ -241,6 +284,16 @@ async function generateSpeechForChunk(chunkText, toneKey) {
       }
 
       if (isRateLimit) {
+        if (OPENAI_API_KEY) {
+          try {
+            return await generateSpeechViaOpenAI(chunkText, toneKey);
+          } catch (fallbackErr) {
+            throw new QuotaError(
+              "Gemini's rate limit was hit and the OpenAI fallback also failed: " +
+                fallbackErr.message
+            );
+          }
+        }
         throw new QuotaError(
           "You've hit the Gemini API's rate limit or free-tier quota. Please wait a minute and try again."
         );
@@ -293,11 +346,16 @@ app.post('/api/generate', async (req, res) => {
     const chunks = splitTextIntoChunks(text, CHUNK_CHAR_LIMIT);
     const audioChunks = [];
     let sampleRate = 24000;
+    let usedFallback = false;
 
     for (let i = 0; i < chunks.length; i += 1) {
-      const { buffer, sampleRate: chunkRate } = await generateSpeechForChunk(chunks[i], tone);
+      const { buffer, sampleRate: chunkRate, provider } = await generateSpeechForChunk(
+        chunks[i],
+        tone
+      );
       audioChunks.push(buffer);
       if (i === 0) sampleRate = chunkRate;
+      if (provider === 'openai') usedFallback = true;
 
       if (i < chunks.length - 1) await sleep(300);
     }
@@ -313,6 +371,7 @@ app.post('/api/generate', async (req, res) => {
       'Content-Type': 'audio/wav',
       'Content-Disposition': `attachment; filename="voiceover-${Date.now()}.wav"`,
       'X-Chunk-Count': String(chunks.length),
+      'X-Used-Fallback': String(usedFallback),
     });
     res.send(wavBuffer);
   } catch (err) {
