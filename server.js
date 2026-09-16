@@ -141,9 +141,18 @@ function buildStyledPrompt(chunkText) {
 
 class QuotaError extends Error {}
 
-async function generateSpeechForChunk(chunkText, { maxRetries = 4 } = {}) {
+// Without an explicit timeout, a stalled connection to Gemini's API (e.g. a
+// flaky network path from the host) hangs the request forever with no error
+// ever surfacing to the client. This bounds every attempt so a stuck call
+// fails loudly instead of leaving the user stuck on "Generating...".
+const REQUEST_TIMEOUT_MS = 20000;
+const MAX_RATE_LIMIT_RETRIES = 4;
+const MAX_TRANSIENT_RETRIES = 2;
+
+async function generateSpeechForChunk(chunkText) {
   const prompt = buildStyledPrompt(chunkText);
-  let attempt = 0;
+  let rateLimitAttempts = 0;
+  let transientAttempts = 0;
   let delay = 1000;
 
   // eslint-disable-next-line no-constant-condition
@@ -157,6 +166,7 @@ async function generateSpeechForChunk(chunkText, { maxRetries = 4 } = {}) {
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: TTS_VOICE_NAME } },
           },
+          httpOptions: { timeout: REQUEST_TIMEOUT_MS },
         },
       });
 
@@ -175,17 +185,34 @@ async function generateSpeechForChunk(chunkText, { maxRetries = 4 } = {}) {
       const message = String(err?.message || '');
       const isRateLimit =
         status === 429 || /RESOURCE_EXHAUSTED|rate limit|quota/i.test(message);
+      const isTransient =
+        !isRateLimit &&
+        /timeout|timed out|ETIMEDOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN|aborted|fetch failed/i.test(
+          message
+        );
 
-      if (isRateLimit && attempt < maxRetries) {
-        attempt += 1;
+      if (isRateLimit && rateLimitAttempts < MAX_RATE_LIMIT_RETRIES) {
+        rateLimitAttempts += 1;
         await sleep(delay);
         delay *= 2;
+        continue;
+      }
+
+      if (isTransient && transientAttempts < MAX_TRANSIENT_RETRIES) {
+        transientAttempts += 1;
+        await sleep(2000);
         continue;
       }
 
       if (isRateLimit) {
         throw new QuotaError(
           "You've hit the Gemini API's rate limit or free-tier quota. Please wait a minute and try again."
+        );
+      }
+
+      if (isTransient) {
+        throw new Error(
+          'The request to the Gemini API timed out. Please try again in a moment.'
         );
       }
 
