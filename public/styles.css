@@ -61,7 +61,12 @@ body {
   display: block;
   font-weight: 600;
   font-size: 0.95rem;
+  margin-top: 20px;
   margin-bottom: 10px;
+}
+
+.label:first-child {
+  margin-top: 0;
 }
 
 textarea {
@@ -88,6 +93,22 @@ textarea:focus {
   font-size: 0.8rem;
   color: var(--muted);
   margin-top: 6px;
+}
+
+.select {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  font-size: 1rem;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .btn {

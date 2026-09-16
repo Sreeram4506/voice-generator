@@ -1,8 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
 import path from 'node:path';
-import fs from 'node:fs';
-import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { GoogleGenAI } from '@google/genai';
 
@@ -20,9 +18,6 @@ const TTS_VOICE_NAME = process.env.TTS_VOICE_NAME || 'Puck';
 const CHUNK_CHAR_LIMIT = 4000;
 const MAX_TOTAL_CHARS = 20000;
 
-const OUTPUT_DIR = path.join(__dirname, 'outputs');
-fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-
 if (!GEMINI_API_KEY) {
   console.warn(
     '\n[warning] GEMINI_API_KEY is not set. Create a .env file (see .env.example) before generating audio.\n'
@@ -34,7 +29,6 @@ const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/outputs', express.static(OUTPUT_DIR));
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -129,14 +123,56 @@ function pcmToWav(pcmData, sampleRate, numChannels = 1, bitDepth = 16) {
   return Buffer.concat([header, pcmData]);
 }
 
-function buildStyledPrompt(chunkText) {
-  return (
-    'Say the following in a warm, conversational, and genuinely enthusiastic ' +
-    'marketing voiceover style — like a real person excited to share great news ' +
-    'with a friend. Use natural pacing, energy, and emphasis on the key words. ' +
-    'Avoid sounding flat, stiff, or robotic.\n\n' +
-    chunkText
-  );
+const DEFAULT_TONE = 'warm';
+
+const TONE_PRESETS = {
+  warm: {
+    label: 'Warm & Enthusiastic',
+    instruction:
+      'Say the following in a warm, conversational, and genuinely enthusiastic marketing ' +
+      'voiceover style — like a real person excited to share great news with a friend. Use ' +
+      'natural pacing, energy, and emphasis on the key words. Avoid sounding flat, stiff, or robotic.',
+  },
+  joyful: {
+    label: 'Joyful & Upbeat',
+    instruction:
+      'Say the following in a joyful, upbeat, and energetic voiceover style — like someone who ' +
+      "just got great news and can't wait to share it. Keep the tone bright and the pacing lively, " +
+      'and let genuine excitement come through in every sentence.',
+  },
+  professional: {
+    label: 'Professional & Polished',
+    instruction:
+      'Say the following in a professional, polished, and confident voiceover style — like a ' +
+      'trusted expert presenting to executives. Speak with clear articulation and measured pacing, ' +
+      'sounding credible and composed without being stiff or monotone.',
+  },
+  casual: {
+    label: 'Casual & Friendly',
+    instruction:
+      'Say the following in a casual, relaxed, and friendly voiceover style — like chatting with a ' +
+      'friend over coffee. Keep it natural and conversational, with light warmth rather than a ' +
+      'polished or formal delivery.',
+  },
+  confident: {
+    label: 'Confident & Bold',
+    instruction:
+      'Say the following in a confident, bold, and assertive voiceover style — like a motivational ' +
+      'speaker who truly believes every word. Use strong emphasis and energetic pacing that commands ' +
+      'attention without shouting.',
+  },
+  calm: {
+    label: 'Calm & Reassuring',
+    instruction:
+      'Say the following in a calm, warm, and reassuring voiceover style — like a trusted advisor ' +
+      'gently sharing good news. Use slow, steady pacing and a soothing tone with genuine care in ' +
+      'every word.',
+  },
+};
+
+function buildStyledPrompt(chunkText, toneKey) {
+  const preset = TONE_PRESETS[toneKey] || TONE_PRESETS[DEFAULT_TONE];
+  return `${preset.instruction}\n\n${chunkText}`;
 }
 
 class QuotaError extends Error {}
@@ -149,8 +185,8 @@ const REQUEST_TIMEOUT_MS = 20000;
 const MAX_RATE_LIMIT_RETRIES = 4;
 const MAX_TRANSIENT_RETRIES = 2;
 
-async function generateSpeechForChunk(chunkText) {
-  const prompt = buildStyledPrompt(chunkText);
+async function generateSpeechForChunk(chunkText, toneKey) {
+  const prompt = buildStyledPrompt(chunkText, toneKey);
   let rateLimitAttempts = 0;
   let transientAttempts = 0;
   let delay = 1000;
@@ -221,6 +257,16 @@ async function generateSpeechForChunk(chunkText) {
   }
 }
 
+app.get('/api/tones', (req, res) => {
+  res.json({
+    tones: Object.entries(TONE_PRESETS).map(([key, preset]) => ({
+      key,
+      label: preset.label,
+    })),
+    defaultTone: DEFAULT_TONE,
+  });
+});
+
 app.post('/api/generate', async (req, res) => {
   try {
     if (!ai) {
@@ -239,12 +285,17 @@ app.post('/api/generate', async (req, res) => {
       });
     }
 
+    const requestedTone = typeof req.body?.tone === 'string' ? req.body.tone : '';
+    const tone = Object.prototype.hasOwnProperty.call(TONE_PRESETS, requestedTone)
+      ? requestedTone
+      : DEFAULT_TONE;
+
     const chunks = splitTextIntoChunks(text, CHUNK_CHAR_LIMIT);
     const audioChunks = [];
     let sampleRate = 24000;
 
     for (let i = 0; i < chunks.length; i += 1) {
-      const { buffer, sampleRate: chunkRate } = await generateSpeechForChunk(chunks[i]);
+      const { buffer, sampleRate: chunkRate } = await generateSpeechForChunk(chunks[i], tone);
       audioChunks.push(buffer);
       if (i === 0) sampleRate = chunkRate;
 
@@ -254,10 +305,16 @@ app.post('/api/generate', async (req, res) => {
     const combinedPcm = Buffer.concat(audioChunks);
     const wavBuffer = pcmToWav(combinedPcm, sampleRate, 1, 16);
 
-    const filename = `voiceover-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.wav`;
-    await fs.promises.writeFile(path.join(OUTPUT_DIR, filename), wavBuffer);
-
-    res.json({ audioUrl: `/outputs/${filename}`, chunkCount: chunks.length });
+    // Serve the finished clip straight from the response instead of writing it
+    // to disk first — some hosts (e.g. serverless platforms) run this handler
+    // in a read-only filesystem, and even on hosts that allow writes, a later
+    // request for a saved file isn't guaranteed to land on the same instance.
+    res.set({
+      'Content-Type': 'audio/wav',
+      'Content-Disposition': `attachment; filename="voiceover-${Date.now()}.wav"`,
+      'X-Chunk-Count': String(chunks.length),
+    });
+    res.send(wavBuffer);
   } catch (err) {
     console.error(err);
     if (err instanceof QuotaError) {

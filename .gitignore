@@ -1,3 +1,4 @@
 node_modules/
 .env
-outputs/*.wav
+.DS_Store
+.claude/scheduled_tasks.lock

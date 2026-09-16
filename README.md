@@ -26,11 +26,11 @@ A minimal web tool for turning marketing scripts into natural-sounding voiceover
 
 ## How it works
 
-- Paste a script into the text box and click **Generate Voiceover**.
-- The server wraps your text in a style instruction ("warm, conversational, enthusiastic marketing voiceover") and sends it to a Gemini TTS model (`gemini-2.5-flash-preview-tts` by default).
+- Paste a script into the text box, pick a **voice tone** (Warm, Joyful, Professional, Casual, Confident, or Calm), and click **Generate Voiceover**.
+- The server wraps your text in a style instruction matching the chosen tone and sends it to a Gemini TTS model (`gemini-2.5-flash-preview-tts` by default).
 - Scripts longer than ~4,000 characters are automatically split at paragraph/sentence boundaries into multiple chunks, sent to Gemini one at a time, and the resulting audio is stitched back together into a single WAV file.
-- If the Gemini API returns a rate-limit/quota error (common on the free tier), the server retries a few times with exponential backoff before surfacing a clear error message.
-- The finished file is saved under `outputs/` and served back to the browser for preview and download.
+- If the Gemini API returns a rate-limit/quota error (common on the free tier), the server retries a few times with exponential backoff before surfacing a clear error message. A stalled network call is also bounded by a request timeout so it fails with a clear error instead of hanging.
+- The finished clip is streamed straight back in the HTTP response (no file is ever written to disk), so this works on hosts with a read-only filesystem too, such as serverless platforms.
 
 ## Configuration
 
@@ -52,9 +52,7 @@ This repo includes a `render.yaml` Blueprint, so Render can configure the servic
 3. Set the `GEMINI_API_KEY` environment variable in the Render dashboard (it's intentionally left out of `render.yaml` so the key never lives in the repo).
 4. Deploy — Render sets `PORT` automatically, which `server.js` already respects.
 
-Note: Render's filesystem is ephemeral, so files written to `outputs/` don't survive a redeploy/restart. That's fine here since each `.wav` only needs to live long enough for the browser to fetch it right after generation.
-
 ## Notes
 
-- Generated `.wav` files accumulate in `outputs/`; feel free to delete old ones periodically.
 - Max script length is 20,000 characters per request (configurable in `server.js` via `MAX_TOTAL_CHARS`).
+- The app has no filesystem dependency, so the same `server.js` can also run on serverless hosts (e.g. Vercel) as a single full-stack deployment — just set `GEMINI_API_KEY` there too. Keep in mind such hosts often cap a single request's execution time (e.g. Vercel's default is much shorter than Render's), which can matter for long, multi-chunk scripts.
