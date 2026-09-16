@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Marketing Voiceover Generator</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="page">
+    <header class="header">
+      <h1>Marketing Voiceover Generator</h1>
+      <p class="subtitle">Paste your script and get a warm, natural voiceover — powered by Gemini TTS.</p>
+    </header>
+
+    <form id="tts-form" class="card">
+      <label for="script-text" class="label">Script</label>
+      <textarea
+        id="script-text"
+        rows="10"
+        placeholder="Paste or type your marketing script here…"
+        required
+      ></textarea>
+      <div class="char-count" id="char-count">0 characters</div>
+
+      <button type="submit" id="generate-btn" class="btn">Generate Voiceover</button>
+
+      <div id="loading" class="loading" hidden>
+        <span class="spinner"></span>
+        Generating your voiceover… this can take a moment for longer scripts.
+      </div>
+
+      <div id="error-banner" class="error-banner" hidden></div>
+    </form>
+
+    <section id="result" class="card" hidden>
+      <h2 class="label">Your Voiceover</h2>
+      <audio id="audio-player" controls></audio>
+      <a id="download-link" class="btn btn-secondary" download>Download WAV</a>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
