@@ -43,6 +43,17 @@ All configuration is via environment variables (see `.env.example`):
 | `TTS_MODEL` | `gemini-2.5-flash-preview-tts` | Gemini TTS model to use. |
 | `TTS_VOICE_NAME` | `Puck` | Prebuilt Gemini voice name. |
 
+## Deploying to Render
+
+This repo includes a `render.yaml` Blueprint, so Render can configure the service automatically:
+
+1. In the Render dashboard, choose **New > Blueprint** and point it at this GitHub repo (or **New > Web Service** and set Build command `npm install` / Start command `npm start` manually).
+2. Render will read `render.yaml` and create a Node web service on the free plan.
+3. Set the `GEMINI_API_KEY` environment variable in the Render dashboard (it's intentionally left out of `render.yaml` so the key never lives in the repo).
+4. Deploy — Render sets `PORT` automatically, which `server.js` already respects.
+
+Note: Render's filesystem is ephemeral, so files written to `outputs/` don't survive a redeploy/restart. That's fine here since each `.wav` only needs to live long enough for the browser to fetch it right after generation.
+
 ## Notes
 
 - Generated `.wav` files accumulate in `outputs/`; feel free to delete old ones periodically.

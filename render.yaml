@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: voice-generator
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: TTS_MODEL
+        value: gemini-2.5-flash-preview-tts
+      - key: TTS_VOICE_NAME
+        value: Puck
